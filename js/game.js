@@ -60,6 +60,15 @@ Game.initGestureDetection = function (){
 
 Game.initWorld = function(){
     // compute ground lines
+    var linesEl = document.getElementById('lines').childNodes;
+    var lines = [];
+    for(var i = 0, l = linesEl.length; i < l; i++){
+        var lineEl = linesEl[i];
+        if(lineEl instanceof SVGPathElement){
+            lines.push(Line.fromPath(lineEl.getAttribute('d')));
+        }
+    }
+    this.lines = lines;
 };
 
 Game.initPlayer = function(){
@@ -155,12 +164,12 @@ Game.physLoop = function(dt){
     // physObjects[] ?
     this.player.y += 5 * dt;
     // collisions
-    var x = this.player.x;
-    /*
+    var box = this.player.getTransformedBBox();
     Game.lines.forEach(function(line){
-        if(line)
+        if(line.intersectBox(box)){
+            console.log('intersect');
+        }
     });
-    * */
 };
 
 Game.update = function(){
@@ -173,10 +182,17 @@ var Player = function(el){
 };
 
 Player.prototype.update = function(){
-    this.el.setAttribute('x', this.x);
-    this.el.setAttribute('y', this.y);
+    var el = this.el;
+    el.setAttribute('transform', 'translate(' + this.x + ' ' + this.y + ')');
 };
 
+Player.prototype.getTransformedBBox = function(){
+    var box = this.el.getBBox();
+    //translation
+    box.x += this.x;
+    box.y += this.y;
+    return box;
+};
 // shim layer with setTimeout fallback
 window.requestAnimFrame = (function(){
   return  window.requestAnimationFrame       || 
@@ -188,3 +204,85 @@ window.requestAnimFrame = (function(){
             window.setTimeout(callback, 1000 / 60);
           };
 }());
+
+var Line = function(pt1, pt2){
+    this.pt1 = pt1;
+    this.pt2 = pt2;
+    this.m = (pt2[1] - pt1[1]) / (pt2[0] - pt1[0]);
+    this.b = - this.m * pt1[0] + pt1[1];
+};
+
+Line.fromPath = function(path){
+    //path = "m 270,448.57143 104.28571,-20"
+    var points = path.substr(2).split(' ');
+    points[0] = points[0].split(',');
+    points[1] = points[1].split(',');
+    var pt1 = points[0];
+    pt1[0] = Number(pt1[0]);
+    pt1[1] = Number(pt1[1]);
+    var pt2 = points[1]; // relative coordinates there
+    pt2[0] = Number(pt2[0]);
+    pt2[1] = Number(pt2[1]);
+    
+    pt2[0] += pt1[0];
+    pt2[1] += pt1[1];
+    return new Line(pt1, pt2);
+};
+
+Line.prototype.intersectBox = function(box){
+    // box is 4 segments, test them
+    var points = [
+        [box.x, box.y],
+        [box.x, box.y + box.height],
+        [box.x + box.width, box.y + box.height],
+        [box.x + box.width, box.y]
+    ];
+    var lines = [
+        new Line(points[0], points[1]),
+        new Line(points[1], points[2]),
+        new Line(points[2], points[3]),
+        new Line(points[3], points[0])
+    ];
+    for(var i = 0, l = lines.length; i < l; i++){
+        if(lines[i].intersectLine(this)){
+            return true;
+        }
+    }
+    return false;
+};
+
+Line.prototype.intersectLine = function(line){
+    // parallel case
+    if(this.m === line.m){
+        return this.b === line.b;
+    }
+    // compute intersection
+    var x, y;
+    if(isFinite(this.m) && isFinite(line.m)){ 
+        x = (line.b - this.b) / (this.m - line.m);
+        y = (this.m * x) + this.b;
+    } else { // vertical
+        if(isFinite(this.m)){
+            x = line.pt1[0];
+            y = this.m * x + this.b;
+        } else {
+            x = this.pt1[0];
+            y = line.m * x + line.b;
+        }
+    }
+    
+    // is the point on the segments ?
+    return this.contains(x, y) && line.contains(x, y);
+};
+
+Line.prototype.contains = function(x, y){
+    var pt1 = this.pt1, pt2 = this.pt2;
+    var minX = Math.min(pt1[0], pt2[0]);
+    var maxX = Math.max(pt1[0], pt2[0]);
+    if(minX > x || maxX < x){
+        return false;
+    }
+    var minY = Math.min(pt1[1], pt2[1]);
+    var maxY = Math.max(pt1[1], pt2[1]);
+    return minY <= y && maxY >= y;
+};
